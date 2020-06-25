@@ -8,6 +8,7 @@ import {
   Alert,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
+import ImagePicker from 'react-native-image-picker';
 import Icon from 'react-native-vector-icons/Feather';
 import * as Yup from 'yup';
 
@@ -29,16 +30,16 @@ import {
   BackButton,
 } from './styles';
 
-interface SignUpFormData {
+interface ProfileFormData {
   name: string;
   email: string;
+  old_password: string;
   password: string;
   password_confirmation: string;
-  old_password: string;
 }
 
 const Profile: React.FC = () => {
-  const { user } = useAuth();
+  const { user, updateUser, signOut } = useAuth();
   const navigation = useNavigation();
   const formRef = useRef<FormHandles>(null);
   const oldPasswordInputRef = useRef<TextInput>(null);
@@ -46,25 +47,25 @@ const Profile: React.FC = () => {
   const confirmPasswordInputRef = useRef<TextInput>(null);
   const emailInputRef = useRef<TextInput>(null);
 
-  const handleSignUp = useCallback(
-    async (data: SignUpFormData) => {
+  const handleUpdateProfile = useCallback(
+    async (data: ProfileFormData) => {
       try {
         formRef.current?.setErrors({});
 
         const schema = Yup.object().shape({
           name: Yup.string().required('Nome é obrigatório'),
-          old_password: Yup.string(),
           email: Yup.string()
             .required('E-mail é obrigatório')
             .email('Digite um e-mail válido'),
+          old_password: Yup.string(),
           password: Yup.string().when('old_password', {
-            is: (val) => !!val.length,
+            is: (val) => val !== '' && val !== undefined,
             then: Yup.string().required('Campo obrigatório'),
             otherwise: Yup.string(),
           }),
           password_confirmation: Yup.string()
             .when('old_password', {
-              is: (val) => !!val.length,
+              is: (val) => val !== '' && val !== undefined,
               then: Yup.string().required('Campo obrigatório'),
               otherwise: Yup.string(),
             })
@@ -75,9 +76,30 @@ const Profile: React.FC = () => {
           abortEarly: false,
         });
 
-        await api.post('/users', data);
+        const {
+          name,
+          email,
+          old_password,
+          password,
+          password_confirmation,
+        } = data;
 
-        Alert.alert('Uhuuul', 'Cadastro realizado com sucesso!');
+        const formData = {
+          name,
+          email,
+          ...(data.old_password
+            ? {
+                old_password,
+                password,
+                password_confirmation,
+              }
+            : {}),
+        };
+
+        const response = await api.put('/profile', formData);
+        updateUser(response.data);
+
+        Alert.alert('Uhuuul', 'Perfil atualizado com sucesso!');
 
         navigation.goBack();
       } catch (err) {
@@ -88,18 +110,48 @@ const Profile: React.FC = () => {
           return;
         }
 
-        Alert.alert(
-          'Erro no Cadastro',
-          'Ocorreu um erro ao fazer o cadastro. Verifique as credenciais.',
-        );
+        Alert.alert('Erro na Atualização do Perfil', err.message);
       }
     },
-    [navigation],
+    [navigation, updateUser],
   );
 
   const handleGoBack = useCallback(() => {
     navigation.goBack();
   }, [navigation]);
+
+  const handleUpdateAvatar = useCallback(async () => {
+    ImagePicker.showImagePicker(
+      {
+        title: 'Selecione uma imagem',
+        cancelButtonTitle: 'Cancelar',
+        takePhotoButtonTitle: 'Tirar Foto',
+        chooseFromLibraryButtonTitle: 'Escolher da Galeria',
+      },
+      (response) => {
+        if (response.didCancel) {
+          return;
+        }
+
+        if (response.error) {
+          Alert.alert('Erro ao atualizar sua imagem.', response.error);
+          return;
+        }
+
+        const data = new FormData();
+
+        data.append('avatar', {
+          uri: response.uri,
+          name: `${user.id}.jpg`,
+          type: 'image/jpeg',
+        });
+
+        api.patch('/users/avatar', data).then((apiResponse) => {
+          updateUser(apiResponse.data);
+        });
+      },
+    );
+  }, [updateUser, user.id]);
 
   return (
     <>
@@ -117,7 +169,7 @@ const Profile: React.FC = () => {
               <Icon name="chevron-left" size={24} color="#999591" />
             </BackButton>
 
-            <UserAvatarButton onPress={() => {}}>
+            <UserAvatarButton onPress={handleUpdateAvatar}>
               <UserAvatar source={{ uri: user.avatar_url }} />
             </UserAvatarButton>
 
@@ -125,7 +177,11 @@ const Profile: React.FC = () => {
               <Title>Meu perfil</Title>
             </View>
 
-            <Form onSubmit={handleSignUp} ref={formRef} initialData={user}>
+            <Form
+              onSubmit={handleUpdateProfile}
+              ref={formRef}
+              initialData={user}
+            >
               <Input
                 autoCapitalize="words"
                 name="name"
@@ -184,6 +240,8 @@ const Profile: React.FC = () => {
               <Button onPress={() => formRef.current?.submitForm()}>
                 Salvar
               </Button>
+
+              <Button onPress={signOut}>Sair</Button>
             </Form>
           </Container>
         </ScrollView>
